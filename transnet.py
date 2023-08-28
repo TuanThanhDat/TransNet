@@ -1,6 +1,7 @@
 import os
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 
 class TransNetParams:
@@ -46,59 +47,71 @@ class TransNet:
 
                         for idx_s in range(self.params.S):
                             with tf.variable_scope("DDCNN_{:d}".format(idx_s + 1)):
-                                net = tf.identity(net)  # improves look of the graph in TensorBoard
+                                # improves look of the graph in TensorBoard
+                                net = tf.identity(net)
                                 conv1 = conv3d(net, filters, 1)
                                 conv2 = conv3d(net, filters, 2)
                                 conv3 = conv3d(net, filters, 4)
                                 conv4 = conv3d(net, filters, 8)
-                                net = tf.concat([conv1, conv2, conv3, conv4], axis=4)
-                                print(" " * 10, "> DDCNN_{:d} ({})".format(idx_s + 1, shape_text(net)))
+                                net = tf.concat(
+                                    [conv1, conv2, conv3, conv4], axis=4)
+                                print(
+                                    " " * 10, "> DDCNN_{:d} ({})".format(idx_s + 1, shape_text(net)))
 
-                        net = tf.keras.layers.MaxPool3D(pool_size=(1, 2, 2))(net)
+                        net = tf.keras.layers.MaxPool3D(
+                            pool_size=(1, 2, 2))(net)
                         print(" " * 10, "MaxPool ({})".format(shape_text(net)))
 
-                shape = [tf.shape(net)[0], tf.shape(net)[1], np.prod(net.get_shape().as_list()[2:])]
+                shape = [tf.shape(net)[0], tf.shape(net)[1],
+                         np.prod(net.get_shape().as_list()[2:])]
                 net = tf.reshape(net, shape=shape, name="flatten_3d")
                 print(" " * 10, "Flatten ({})".format(shape_text(net)))
-                net = tf.keras.layers.Dense(self.params.D, activation=tf.nn.relu)(net)
+                net = tf.keras.layers.Dense(
+                    self.params.D, activation=tf.nn.relu)(net)
                 print(" " * 10, "Dense ({})".format(shape_text(net)))
 
                 self.logits = tf.keras.layers.Dense(2, activation=None)(net)
                 print(" " * 10, "Logits ({})".format(shape_text(self.logits)))
-                self.predictions = tf.nn.softmax(self.logits, name="predictions")[:, :, 1]
+                self.predictions = tf.nn.softmax(
+                    self.logits, name="predictions")[:, :, 1]
                 print(" " * 10, "Predictions ({})".format(shape_text(self.predictions)))
 
             print("[TransNet] Network built.")
-            no_params = np.sum([int(np.prod(v.get_shape().as_list())) for v in tf.trainable_variables()])
-            print("[TransNet] Found {:d} trainable parameters.".format(no_params))
+            no_params = np.sum([int(np.prod(v.get_shape().as_list()))
+                               for v in tf.trainable_variables()])
+            print(
+                "[TransNet] Found {:d} trainable parameters.".format(no_params))
 
     def _restore(self):
         if self.params.CHECKPOINT_PATH is not None:
             saver = tf.train.Saver()
             saver.restore(self.session, self.params.CHECKPOINT_PATH)
-            print("[TransNet] Parameters restored from '{}'.".format(os.path.basename(self.params.CHECKPOINT_PATH)))
+            print("[TransNet] Parameters restored from '{}'.".format(
+                os.path.basename(self.params.CHECKPOINT_PATH)))
 
     def predict_raw(self, frames: np.ndarray):
         assert len(frames.shape) == 5 and \
-               list(frames.shape[2:]) == [self.params.INPUT_HEIGHT, self.params.INPUT_WIDTH, 3],\
+            list(frames.shape[2:]) == [self.params.INPUT_HEIGHT, self.params.INPUT_WIDTH, 3],\
             "[TransNet] Input shape must be [batch, frames, height, width, 3]."
         return self.session.run(self.predictions, feed_dict={self.inputs: frames})
 
     def predict_video(self, frames: np.ndarray):
         assert len(frames.shape) == 4 and \
-               list(frames.shape[1:]) == [self.params.INPUT_HEIGHT, self.params.INPUT_WIDTH, 3], \
+            list(frames.shape[1:]) == [self.params.INPUT_HEIGHT, self.params.INPUT_WIDTH, 3], \
             "[TransNet] Input shape must be [frames, height, width, 3]."
 
         def input_iterator():
             # return windows of size 100 where the first/last 25 frames are from the previous/next batch
             # the first and last window must be padded by copies of the first and last frame of the video
             no_padded_frames_start = 25
-            no_padded_frames_end = 25 + 50 - (len(frames) % 50 if len(frames) % 50 != 0 else 50)  # 25 - 74
+            no_padded_frames_end = 25 + 50 - \
+                (len(frames) % 50 if len(frames) % 50 != 0 else 50)  # 25 - 74
 
             start_frame = np.expand_dims(frames[0], 0)
             end_frame = np.expand_dims(frames[-1], 0)
             padded_inputs = np.concatenate(
-                [start_frame] * no_padded_frames_start + [frames] + [end_frame] * no_padded_frames_end, 0
+                [start_frame] * no_padded_frames_start +
+                [frames] + [end_frame] * no_padded_frames_end, 0
             )
 
             ptr = 0
